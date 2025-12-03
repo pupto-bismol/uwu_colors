@@ -3,7 +3,7 @@
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
-    utils.url = "github:numtide/flake-utils";
+    systems.url = "github:nix-systems/default";
   };
 
   nixConfig = {
@@ -16,33 +16,45 @@
     ];
   };
 
-  outputs = {
-    self,
-    nixpkgs,
-    utils,
-  }:
-    {
-      overlays.default = final: prev: {
-        uwu-colors = self.packages.${final.stdenv.hostPlatform.system}.default;
-      };
-    }
-    // utils.lib.eachDefaultSystem
-    (system: let
-      pkgs = import nixpkgs {inherit system;};
-    in {
-      packages = {
-        default = pkgs.rustPlatform.buildRustPackage {
+  outputs =
+    { nixpkgs, systems, ... }:
+    let
+      forAllSystems = fn: nixpkgs.lib.genAttrs (import systems) (sys: fn nixpkgs.legacyPackages.${sys});
+
+      flakePackage = pkgs: pkgs.callPackage (
+        {
+          lib,
+          buildRustPackage,
+          clippy,
+        }:
+        buildRustPackage {
           name = "uwu_colors";
 
           nativeBuildInputs = [
-            pkgs.clippy
+            clippy
           ];
 
           cargoLock.lockFile = ./Cargo.lock;
-          src = pkgs.lib.cleanSource ./.;
+          src = lib.cleanSource ./.;
+        }
+      ) { inherit (pkgs.rustPlatform) buildRustPackage; };
+    in
+    {
+      overlays = {
+        default = final: prev: {
+          uwu-colors = flakePackage prev;
         };
       };
 
-      apps.default = utils.lib.mkApp {drv = self.packages.${system}.default;};
-    });
+      packages = forAllSystems (pkgs: {
+        default = flakePackage pkgs;
+      });
+
+      apps = forAllSystems (pkgs: {
+        default = {
+          type = "app";
+          program = nixpkgs.lib.getExe' (flakePackage pkgs) "uwu_colors";
+        };
+      });
+    };
 }
